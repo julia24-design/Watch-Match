@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#0f1418" />
+  <title>WatchMatch — Find your shared Letterboxd watchlist</title>
+  <meta name="description" content="Compare two public Letterboxd watchlists and find the films you both want to see." />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div class="brand" aria-label="WatchMatch">
+        <span class="brand-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>WatchMatch</span>
+      </div>
+      <p class="eyebrow">Shared watchlists, minus the group-chat debate.</p>
+      <h1>What do you both<br><em>want to watch?</em></h1>
+      <p class="subhead">Enter two public Letterboxd usernames — or paste their profile/watchlist URLs — and find the overlap.</p>
+    </header>
+
+    <section class="matcher-card" aria-labelledby="matcher-title">
+      <h2 id="matcher-title" class="sr-only">Compare watchlists</h2>
+      <div class="people-row">
+        <label class="person-field">
+          <span>You</span>
+          <div class="input-wrap"><span class="at">@</span><input id="user1" value="juliastephenson" autocomplete="off" spellcheck="false" aria-label="Your Letterboxd username or URL" /></div>
+        </label>
+        <div class="plus" aria-hidden="true">+</div>
+        <label class="person-field">
+          <span>Your friend</span>
+          <div class="input-wrap"><span class="at">@</span><input id="user2" value="coliebb" autocomplete="off" spellcheck="false" aria-label="Friend's Letterboxd username or URL" /></div>
+        </label>
+      </div>
+      <button id="matchBtn" class="match-btn">Find our movies <span aria-hidden="true">→</span></button>
+      <p class="tiny-note">Works only with public watchlists. This prototype reads public Letterboxd pages on demand.</p>
+    </section>
+
+    <section id="status" class="status hidden" aria-live="polite"></section>
+
+    <section id="results" class="results hidden">
+      <div class="results-head">
+        <div>
+          <p id="pairLabel" class="eyebrow"></p>
+          <h2><span id="matchCount">0</span> movies in common</h2>
+        </div>
+        <button id="shuffleBtn" class="secondary-btn">Surprise me</button>
+      </div>
+      <div id="movieGrid" class="movie-grid"></div>
+    </section>
+
+    <footer>
+      <p>Unofficial personal project. Not affiliated with Letterboxd.</p>
+    </footer>
+  </main>
+  <script src="/script.js"></script>
+</body>
+</html>
