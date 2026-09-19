@@ -10,11 +10,16 @@ const LIST_CACHE = globalThis.__watchMatchListCache || new Map();
 globalThis.__watchMatchListCache = LIST_CACHE;
 const LIST_CACHE_TTL = 15 * 60 * 1000;
 const REQUEST_GAP_MS = 700;
+const WATCHED_PAGE_LIMIT = 7;
+const WATCHED_FILM_LIMIT = 500;
 
 const MODES = {
   watchlist: { path: 'watchlist', label: 'Watchlist' },
   watched: { path: 'films', label: 'Watched films' },
-  liked: { path: 'likes/films', label: 'Liked films' }
+  // Letterboxd currently challenges the unpaginated likes URL even when the
+  // equivalent explicit first page is public. Start at /page/1/ so a small
+  // likes list does not fail before we have read a single film.
+  liked: { path: 'likes/films', label: 'Liked films', explicitFirstPage: true }
 };
 
 function first(value) {
@@ -203,7 +208,7 @@ export async function fetchMemberFilms(username, mode, session = null) {
   if (cached) return cached;
   const config = MODES[mode];
   const basePath = `/${username}/${config.path}/`;
-  const firstUrl = `${LETTERBOXD}${basePath}`;
+  const firstUrl = `${LETTERBOXD}${basePath}${config.explicitFirstPage ? 'page/1/' : ''}`;
   const firstPage = await fetchHtml(firstUrl, 2, session);
 
   if (firstPage.status === 404 || /Page Not Found|Member not found/i.test(firstPage.html)) {
@@ -261,6 +266,46 @@ export async function fetchMemberFilms(username, mode, session = null) {
     status: films.length ? 'public' : 'empty',
     films
   });
+}
+
+export async function fetchWatchedPage(username, pageNumber) {
+  const label = MODES.watched.label;
+  const path = `/${username}/films/${pageNumber === 1 ? '' : `page/${pageNumber}/`}`;
+  const result = await fetchHtml(`${LETTERBOXD}${path}`, 2, {
+    cookies: new Map(),
+    lastRequestAt: 0
+  });
+
+  if (result.status === 404 || /Page Not Found|Member not found/i.test(result.html)) {
+    return { username, label, status: 'not_found', films: [] };
+  }
+  if (isChallenge(result.html, result.status) || result.status === 429) {
+    return { username, label, status: 'blocked', films: [] };
+  }
+  if (result.status < 200 || result.status >= 300) {
+    return { username, label, status: 'unavailable', films: [] };
+  }
+
+  const films = parseFilms(result.html);
+  if (pageNumber === 1 && !films.length && privateMessage(result.html, 'watched')) {
+    return { username, label, status: 'private', films: [] };
+  }
+  if (pageNumber === 1 && !films.length && !pageLooksRelevant(result.html, 'watched')) {
+    return { username, label, status: 'unavailable', films: [] };
+  }
+
+  const availablePages = maxPage(result.html);
+  const totalPages = Math.min(availablePages, WATCHED_PAGE_LIMIT);
+  return {
+    username,
+    label,
+    status: films.length ? 'public' : 'empty',
+    page: pageNumber,
+    totalPages,
+    filmLimit: WATCHED_FILM_LIMIT,
+    truncated: availablePages > WATCHED_PAGE_LIMIT,
+    films
+  };
 }
 
 export function intersection(firstList, secondList) {
@@ -344,6 +389,35 @@ export default async function handler(request, response) {
   const mode = url.searchParams.get('mode') || 'watchlist';
   if (!MODES[mode]) {
     sendJson(response, 400, { error: 'Unknown comparison type.' });
+    return;
+  }
+
+  const singleUser = normalizeUsername(url.searchParams.get('user'));
+  const requestedPage = Number(url.searchParams.get('page'));
+  if (mode === 'watched' && singleUser && Number.isInteger(requestedPage)) {
+    if (requestedPage < 1 || requestedPage > WATCHED_PAGE_LIMIT) {
+      sendJson(response, 400, { error: `Watched pages must be between 1 and ${WATCHED_PAGE_LIMIT}.` });
+      return;
+    }
+    try {
+      const source = await fetchWatchedPage(singleUser, requestedPage);
+      if (['private', 'not_found', 'unavailable', 'blocked'].includes(source.status)) {
+        const friendly = errorFor(source);
+        sendJson(response, 422, {
+          ...friendly,
+          user: singleUser,
+          mode,
+          page: requestedPage,
+          source: { ...source, films: undefined }
+        });
+        return;
+      }
+      response.setHeader('Cache-Control', 'public, max-age=300, s-maxage=86400, stale-while-revalidate=604800');
+      sendJson(response, 200, source);
+    } catch (error) {
+      console.error(error);
+      sendJson(response, 500, { error: 'WatchMatch could not load this page of watched films.' });
+    }
     return;
   }
 
