@@ -146,6 +146,14 @@ function render(data, mode) {
   shuffleBtn.classList.toggle('hidden', currentMovies.length === 0);
 
   if (!currentMovies.length) {
+    if (data.partial) {
+      gridEl.appendChild(messageCard(
+        'No shared films found in the loaded pages yet',
+        'This is only a partial result. Resume loading to continue checking the remaining pages.'
+      ));
+      hideStatus();
+      return;
+    }
     const emptySource = (data.sources || []).find(source => source.status === 'empty');
     const title = emptySource
       ? `@${emptySource.username}'s ${emptySource.label.toLowerCase()} is empty`
@@ -158,6 +166,23 @@ function render(data, mode) {
     currentMovies.forEach((movie, index) => gridEl.appendChild(movieCard(movie, index)));
   }
   hideStatus();
+}
+
+function renderPartial(data, error) {
+  render(data, 'watched');
+  matchLabelEl.textContent = "movies you've both watched so far";
+  const loadedPages = data.progress?.loadedPages || 0;
+  const totalPages = data.progress?.totalPages || '—';
+  showStatus(
+    `Showing ${data.matches.length} matches found from ${loadedPages} of ${totalPages} profile pages. Letterboxd paused the remaining pages, but your progress is saved.`,
+    true
+  );
+  const button = document.createElement('button');
+  button.className = 'secondary-btn';
+  button.style.marginLeft = '12px';
+  button.textContent = 'Resume loading';
+  button.addEventListener('click', () => loadMode('watched', { force: true }));
+  statusEl.appendChild(button);
 }
 
 function renderError(error, mode) {
@@ -283,35 +308,17 @@ async function requestWatchedPage(member, page) {
   saveWatchedState(member);
 }
 
-async function loadWatchedComparison(user1, user2) {
-  const members = [watchedMember(user1), watchedMember(user2)];
-  let madeRequest = false;
-  updateWatchedProgress(members);
-
-  while (members.some(member => !member.complete)) {
-    let advanced = false;
-    for (const member of members) {
-      const page = nextWatchedPage(member);
-      if (!page) {
-        member.complete = true;
-        saveWatchedState(member);
-        continue;
-      }
-      if (madeRequest) await sleep(WATCHED_PAGE_DELAY_MS);
-      await requestWatchedPage(member, page);
-      madeRequest = true;
-      advanced = true;
-      updateWatchedProgress(members);
-    }
-    if (!advanced) break;
-  }
-
+function watchedComparisonData(members, partial = false) {
   const lists = members.map(memberFilms);
   const secondSlugs = new Set(lists[1].map(film => film.slug));
   const matches = lists[0].filter(film => secondSlugs.has(film.slug));
+  const loadedPages = members.reduce((sum, member) => sum + Object.keys(member.pages).length, 0);
+  const totalPages = members.reduce((sum, member) => sum + (member.totalPages || 1), 0);
   return {
     users: members.map(member => member.username),
     mode: 'watched',
+    partial,
+    progress: { loadedPages, totalPages },
     counts: lists.map(list => list.length),
     sources: members.map((member, index) => ({
       username: member.username,
@@ -321,6 +328,40 @@ async function loadWatchedComparison(user1, user2) {
     })),
     matches
   };
+}
+
+async function loadWatchedComparison(user1, user2) {
+  const members = [watchedMember(user1), watchedMember(user2)];
+  let madeRequest = false;
+  updateWatchedProgress(members);
+
+  try {
+    while (members.some(member => !member.complete)) {
+      let advanced = false;
+      for (const member of members) {
+        const page = nextWatchedPage(member);
+        if (!page) {
+          member.complete = true;
+          saveWatchedState(member);
+          continue;
+        }
+        if (madeRequest) await sleep(WATCHED_PAGE_DELAY_MS);
+        await requestWatchedPage(member, page);
+        madeRequest = true;
+        advanced = true;
+        updateWatchedProgress(members);
+      }
+      if (!advanced) break;
+    }
+  } catch (error) {
+    const loadedPages = members.reduce((sum, member) => sum + Object.keys(member.pages).length, 0);
+    if (error.resumable && loadedPages > 0) {
+      error.partialData = watchedComparisonData(members, true);
+    }
+    throw error;
+  }
+
+  return watchedComparisonData(members);
 }
 
 function showLoading(mode) {
@@ -376,6 +417,10 @@ async function loadMode(mode, { force = false } = {}) {
     cache[mode] = { data };
     render(data, mode);
   } catch (error) {
+    if (mode === 'watched' && error.partialData) {
+      renderPartial(error.partialData, error);
+      return;
+    }
     const friendlyError = {
       title: error.title,
       message: error.message || 'Something went wrong.',
