@@ -1,9 +1,15 @@
 const LETTERBOXD = 'https://letterboxd.com';
 const REQUEST_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (compatible; WatchMatch/2.0; personal project)',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36',
   Accept: 'text/html,application/xhtml+xml',
-  'Accept-Language': 'en-US,en;q=0.9'
+  'Accept-Language': 'en-US,en;q=0.9',
+  'Upgrade-Insecure-Requests': '1'
 };
+
+const LIST_CACHE = globalThis.__watchMatchListCache || new Map();
+globalThis.__watchMatchListCache = LIST_CACHE;
+const LIST_CACHE_TTL = 15 * 60 * 1000;
+const REQUEST_GAP_MS = 700;
 
 const MODES = {
   watchlist: { path: 'watchlist', label: 'Watchlist' },
@@ -113,17 +119,54 @@ function privateMessage(html, mode) {
   return new RegExp(`${name}[^.]{0,100}private|private[^.]{0,100}${name}`, 'i').test(decodeHtml(text));
 }
 
-async function fetchHtml(url, attempts = 2) {
+function sleep(milliseconds) {
+  return new Promise(resolve => setTimeout(resolve, milliseconds));
+}
+
+function updateSessionCookies(headers, session) {
+  if (!session) return;
+  let values = [];
+  if (typeof headers.getSetCookie === 'function') {
+    values = headers.getSetCookie();
+  } else {
+    const combined = headers.get('set-cookie');
+    if (combined) values = combined.split(/,(?=\s*[^;,]+=)/);
+  }
+  for (const value of values) {
+    const pair = value.split(';', 1)[0];
+    const separator = pair.indexOf('=');
+    if (separator < 1) continue;
+    const name = pair.slice(0, separator).trim();
+    const cookieValue = pair.slice(separator + 1).trim();
+    if (cookieValue) session.cookies.set(name, cookieValue);
+    else session.cookies.delete(name);
+  }
+}
+
+async function waitForSession(session) {
+  if (!session) return;
+  const wait = REQUEST_GAP_MS - (Date.now() - session.lastRequestAt);
+  if (wait > 0) await sleep(wait);
+  session.lastRequestAt = Date.now();
+}
+
+async function fetchHtml(url, attempts = 2, session = null) {
   let lastResult;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    await waitForSession(session);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
     try {
+      const headers = { ...REQUEST_HEADERS };
+      if (session?.cookies?.size) {
+        headers.Cookie = [...session.cookies].map(([name, value]) => `${name}=${value}`).join('; ');
+      }
       const response = await fetch(url, {
-        headers: REQUEST_HEADERS,
+        headers,
         redirect: 'follow',
         signal: controller.signal
       });
+      updateSessionCookies(response.headers, session);
       const html = await response.text();
       lastResult = { status: response.status, html, finalUrl: response.url };
       if (![403, 429, 500, 502, 503, 504].includes(response.status)) return lastResult;
@@ -132,30 +175,36 @@ async function fetchHtml(url, attempts = 2) {
     } finally {
       clearTimeout(timeout);
     }
-    if (attempt < attempts - 1) await new Promise(resolve => setTimeout(resolve, 650));
+    if (attempt < attempts - 1) await sleep(2500 * (attempt + 1));
   }
   return lastResult;
 }
 
-async function mapWithConcurrency(items, limit, mapper) {
-  const results = new Array(items.length);
-  let cursor = 0;
-  async function worker() {
-    while (cursor < items.length) {
-      const index = cursor;
-      cursor += 1;
-      results[index] = await mapper(items[index], index);
-    }
+function cachedList(username, mode) {
+  const key = `${username}:${mode}`;
+  const cached = LIST_CACHE.get(key);
+  if (!cached) return null;
+  if (Date.now() - cached.savedAt > LIST_CACHE_TTL) {
+    LIST_CACHE.delete(key);
+    return null;
   }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return results;
+  return cached.value;
 }
 
-export async function fetchMemberFilms(username, mode) {
+function cacheList(username, mode, value) {
+  if (['public', 'empty'].includes(value.status)) {
+    LIST_CACHE.set(`${username}:${mode}`, { savedAt: Date.now(), value });
+  }
+  return value;
+}
+
+export async function fetchMemberFilms(username, mode, session = null) {
+  const cached = cachedList(username, mode);
+  if (cached) return cached;
   const config = MODES[mode];
   const basePath = `/${username}/${config.path}/`;
   const firstUrl = `${LETTERBOXD}${basePath}`;
-  const firstPage = await fetchHtml(firstUrl);
+  const firstPage = await fetchHtml(firstUrl, 2, session);
 
   if (firstPage.status === 404 || /Page Not Found|Member not found/i.test(firstPage.html)) {
     return { username, label: config.label, status: 'not_found', films: [] };
@@ -180,30 +229,17 @@ export async function fetchMemberFilms(username, mode) {
   }
 
   const pages = maxPage(firstPage.html);
-  const remainingPageNumbers = Array.from({ length: pages - 1 }, (_, index) => index + 2);
-  let remaining = await mapWithConcurrency(remainingPageNumbers, 2, async pageNumber => {
-    const result = await fetchHtml(`${LETTERBOXD}${basePath}page/${pageNumber}/`);
-    return {
+  const remaining = [];
+  for (let pageNumber = 2; pageNumber <= pages; pageNumber += 1) {
+    const result = await fetchHtml(`${LETTERBOXD}${basePath}page/${pageNumber}/`, 2, session);
+    const page = {
       pageNumber,
       ok: result.status === 200 && !isChallenge(result.html, result.status),
       blocked: isChallenge(result.html, result.status) || result.status === 429,
       films: result.status === 200 ? parseFilms(result.html) : []
     };
-  });
-
-  // Retry failed pages one at a time. Letterboxd occasionally challenges a
-  // burst of paginated requests even when the first page succeeds.
-  for (let index = 0; index < remaining.length; index += 1) {
-    if (remaining[index].ok) continue;
-    await new Promise(resolve => setTimeout(resolve, 500));
-    const pageNumber = remaining[index].pageNumber;
-    const retry = await fetchHtml(`${LETTERBOXD}${basePath}page/${pageNumber}/`, 1);
-    remaining[index] = {
-      pageNumber,
-      ok: retry.status === 200 && !isChallenge(retry.html, retry.status),
-      blocked: isChallenge(retry.html, retry.status) || retry.status === 429,
-      films: retry.status === 200 ? parseFilms(retry.html) : []
-    };
+    remaining.push(page);
+    if (!page.ok) break;
   }
 
   const failedPage = remaining.find(page => !page.ok);
@@ -219,12 +255,12 @@ export async function fetchMemberFilms(username, mode) {
   const deduped = new Map();
   for (const film of [firstFilms, ...remaining.map(page => page.films)].flat()) deduped.set(film.slug, film);
   const films = [...deduped.values()];
-  return {
+  return cacheList(username, mode, {
     username,
     label: config.label,
     status: films.length ? 'public' : 'empty',
     films
-  };
+  });
 }
 
 export function intersection(firstList, secondList) {
@@ -319,10 +355,10 @@ export default async function handler(request, response) {
   }
 
   try {
-    const sources = await Promise.all([
-      fetchMemberFilms(user1, mode),
-      fetchMemberFilms(user2, mode)
-    ]);
+    const session = { cookies: new Map(), lastRequestAt: 0 };
+    const firstSource = await fetchMemberFilms(user1, mode, session);
+    const secondSource = await fetchMemberFilms(user2, mode, session);
+    const sources = [firstSource, secondSource];
     const inaccessible = inaccessibleSource(sources);
     if (inaccessible) {
       const friendly = errorFor(inaccessible);
