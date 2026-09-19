@@ -17,3 +17,5 @@ No environment variables or API keys are required.
 ## Notes
 
 Only public Letterboxd data can be compared. Private or unavailable sections show a friendly error message. This is an unofficial personal project and is not affiliated with Letterboxd.
+
+Version 2.1 fetches paginated histories sequentially with a short delay, reuses one Letterboxd session, and caches completed lists to reduce rate limiting.
