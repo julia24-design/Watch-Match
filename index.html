@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="theme-color" content="#0f1418" />
-  <title>WatchMatch — Find your shared Letterboxd watchlist</title>
-  <meta name="description" content="Compare two public Letterboxd watchlists and find the films you both want to see." />
+  <title>WatchMatch — Find your Letterboxd overlap</title>
+  <meta name="description" content="Compare two public Letterboxd profiles to find shared watchlist films, watched films, and likes." />
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
@@ -15,9 +15,9 @@
         <span class="brand-dots" aria-hidden="true"><i></i><i></i><i></i></span>
         <span>WatchMatch</span>
       </div>
-      <p class="eyebrow">Shared watchlists, minus the group-chat debate.</p>
+      <p class="eyebrow">Shared taste, minus the group-chat debate.</p>
       <h1>What do you both<br><em>want to watch?</em></h1>
-      <p class="subhead">Enter two public Letterboxd usernames — or paste their profile/watchlist URLs — and find the overlap.</p>
+      <p class="subhead">Enter two Letterboxd usernames — or paste their profile URLs — to compare watchlists, watched films, and likes.</p>
     </header>
 
     <section class="matcher-card" aria-labelledby="matcher-title">
@@ -34,16 +34,21 @@
         </label>
       </div>
       <button id="matchBtn" class="match-btn">Find our movies <span aria-hidden="true">→</span></button>
-      <p class="tiny-note">Works only with public watchlists. This prototype reads public Letterboxd pages on demand.</p>
+      <p class="tiny-note">Only public profile data can be compared. WatchMatch reads public Letterboxd pages on demand.</p>
     </section>
 
     <section id="status" class="status hidden" aria-live="polite"></section>
 
     <section id="results" class="results hidden">
+      <div class="match-tabs" role="tablist" aria-label="What to compare">
+        <button class="match-tab active" data-mode="watchlist" role="tab" aria-selected="true">Watchlist</button>
+        <button class="match-tab" data-mode="watched" role="tab" aria-selected="false">Watched</button>
+        <button class="match-tab" data-mode="liked" role="tab" aria-selected="false">Liked</button>
+      </div>
       <div class="results-head">
         <div>
           <p id="pairLabel" class="eyebrow"></p>
-          <h2><span id="matchCount">0</span> movies in common</h2>
+          <h2><span id="matchCount">0</span> <span id="matchLabel">movies you both want to watch</span></h2>
         </div>
         <button id="shuffleBtn" class="secondary-btn">Surprise me</button>
       </div>
