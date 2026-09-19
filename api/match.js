@@ -68,7 +68,9 @@ function posterFromTag(tag, slug) {
 }
 
 export function parseFilms(html) {
-  const gridStart = html.indexOf('<div class="poster-grid"');
+  const standardGridStart = html.indexOf('<div class="poster-grid"');
+  const compactGrid = html.match(/<ul\b[^>]*class=(?:"[^"]*\bposter-list\b[^"]*-grid[^"]*"|'[^']*\bposter-list\b[^']*-grid[^']*')[^>]*>/i);
+  const gridStart = standardGridStart >= 0 ? standardGridStart : (compactGrid?.index ?? -1);
   if (gridStart < 0) return [];
   const pageEnd = html.indexOf('<div class="pagination"', gridStart);
   const scope = html.slice(gridStart, pageEnd > gridStart ? pageEnd : undefined);
