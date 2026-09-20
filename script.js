@@ -11,6 +11,7 @@ const shuffleBtn = document.getElementById('shuffleBtn');
 const tabs = [...document.querySelectorAll('.match-tab')];
 const WATCHED_PAGE_DELAY_MS = 1400;
 const WATCHED_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const WATCHED_IMPORT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const WATCHED_FILM_LIMIT = 500;
 
 const MODES = {
@@ -147,9 +148,10 @@ function render(data, mode) {
 
   if (!currentMovies.length) {
     if (data.partial) {
+      const exportName = data.mode === 'watchlist' ? 'watchlist.csv' : 'watched.csv';
       gridEl.appendChild(messageCard(
         'No shared films found in the loaded pages yet',
-        'This is only a partial result. Resume loading to continue checking the remaining pages.'
+        `This is only a partial result. Upload both ${exportName} exports below to check the complete lists.`
       ));
       hideStatus();
       return;
@@ -168,21 +170,31 @@ function render(data, mode) {
   hideStatus();
 }
 
-function renderPartial(data, error) {
-  render(data, 'watched');
-  matchLabelEl.textContent = "movies you've both watched so far";
-  const loadedPages = data.progress?.loadedPages || 0;
-  const totalPages = data.progress?.totalPages || '—';
+function renderCollectionPartial(data, mode) {
+  render(data, mode);
+  const isWatchlist = mode === 'watchlist';
+  matchLabelEl.textContent = isWatchlist
+    ? 'movies you both want to watch so far'
+    : "movies you've both watched so far";
   showStatus(
-    `Showing ${data.matches.length} matches found from ${loadedPages} of ${totalPages} profile pages. Letterboxd paused the remaining pages, but your progress is saved.`,
-    true
+    `Showing ${data.matches.length} confirmed ${data.matches.length === 1 ? 'match' : 'matches'} from the public profile pages Letterboxd allowed us to read. Larger ${isWatchlist ? 'watchlists' : 'watched histories'} require the optional exports below for complete results.`
   );
-  const button = document.createElement('button');
-  button.className = 'secondary-btn';
-  button.style.marginLeft = '12px';
-  button.textContent = 'Resume loading';
-  button.addEventListener('click', () => loadMode('watched', { force: true }));
-  statusEl.appendChild(button);
+  statusEl.appendChild(collectionImportPanel(data.memberStates || [], mode));
+}
+
+function renderCollection(data, mode) {
+  if (data.partial) {
+    renderCollectionPartial(data, mode);
+    return;
+  }
+  render(data, mode);
+  const importedUsers = (data.memberStates || [])
+    .filter(member => member.importedFilms)
+    .map(member => `@${member.username}`);
+  if (importedUsers.length) {
+    const noun = mode === 'watchlist' ? 'watchlists' : 'watched histories';
+    showStatus(`Complete ${noun} loaded locally for ${importedUsers.join(' and ')}. These files stay in this browser.`);
+  }
 }
 
 function renderError(error, mode) {
@@ -191,15 +203,10 @@ function renderError(error, mode) {
   countEl.textContent = error.resumable ? '—' : '0';
   shuffleBtn.classList.add('hidden');
   gridEl.innerHTML = '';
-  const action = error.resumable ? {
-    label: 'Resume loading',
-    onClick: () => loadMode('watched', { force: true })
-  } : null;
   gridEl.appendChild(messageCard(
     error.title || `We couldn't compare ${MODES[mode].label}`,
     error.message || 'The profile may be private, empty, unavailable, or the username may be incorrect.',
-    true,
-    action
+    true
   ));
   hideStatus();
 }
@@ -210,6 +217,10 @@ function sleep(milliseconds) {
 
 function watchedStorageKey(username) {
   return `watchmatch:watched:v3:${username.trim().toLowerCase()}`;
+}
+
+function watchedImportStorageKey(username) {
+  return `watchmatch:watched-import:v1:${username.trim().replace(/^@/, '').toLowerCase()}`;
 }
 
 function readWatchedState(username) {
@@ -242,11 +253,38 @@ function saveWatchedState(member) {
   }
 }
 
+function readWatchedImport(username) {
+  try {
+    const raw = localStorage.getItem(watchedImportStorageKey(username));
+    if (!raw) return null;
+    const imported = JSON.parse(raw);
+    if (!imported.savedAt || Date.now() - imported.savedAt > WATCHED_IMPORT_TTL_MS) {
+      localStorage.removeItem(watchedImportStorageKey(username));
+      return null;
+    }
+    return imported.films || null;
+  } catch {
+    return null;
+  }
+}
+
+function saveWatchedImport(member) {
+  try {
+    localStorage.setItem(watchedImportStorageKey(member.input), JSON.stringify({
+      films: member.importedFilms,
+      savedAt: Date.now()
+    }));
+  } catch {
+    // Large exports can exceed browser storage. The current comparison still works.
+  }
+}
+
 function watchedMember(input) {
   const saved = readWatchedState(input);
   return {
     input,
     username: saved?.username || input.trim().replace(/^@/, ''),
+    importedFilms: readWatchedImport(input),
     pages: saved?.pages || {},
     totalPages: saved?.totalPages || null,
     truncated: Boolean(saved?.truncated),
@@ -254,7 +292,84 @@ function watchedMember(input) {
   };
 }
 
+function watchlistStorageKey(username) {
+  return `watchmatch:watchlist:v1:${username.trim().toLowerCase()}`;
+}
+
+function watchlistImportStorageKey(username) {
+  return `watchmatch:watchlist-import:v1:${username.trim().replace(/^@/, '').toLowerCase()}`;
+}
+
+function readWatchlistState(username) {
+  try {
+    const raw = localStorage.getItem(watchlistStorageKey(username));
+    if (!raw) return null;
+    const state = JSON.parse(raw);
+    if (!state.savedAt || Date.now() - state.savedAt > WATCHED_CACHE_TTL_MS) {
+      localStorage.removeItem(watchlistStorageKey(username));
+      return null;
+    }
+    return state;
+  } catch {
+    return null;
+  }
+}
+
+function saveWatchlistState(member) {
+  try {
+    localStorage.setItem(watchlistStorageKey(member.input), JSON.stringify({
+      username: member.username,
+      pages: member.pages,
+      totalPages: member.totalPages,
+      complete: member.complete,
+      savedAt: Date.now()
+    }));
+  } catch {
+    // The comparison still works if private browsing blocks local storage.
+  }
+}
+
+function readWatchlistImport(username) {
+  try {
+    const raw = localStorage.getItem(watchlistImportStorageKey(username));
+    if (!raw) return null;
+    const imported = JSON.parse(raw);
+    if (!imported.savedAt || Date.now() - imported.savedAt > WATCHED_IMPORT_TTL_MS) {
+      localStorage.removeItem(watchlistImportStorageKey(username));
+      return null;
+    }
+    return imported.films || null;
+  } catch {
+    return null;
+  }
+}
+
+function saveWatchlistImport(member) {
+  try {
+    localStorage.setItem(watchlistImportStorageKey(member.input), JSON.stringify({
+      films: member.importedFilms,
+      savedAt: Date.now()
+    }));
+  } catch {
+    // Large exports can exceed browser storage. The current comparison still works.
+  }
+}
+
+function watchlistMember(input) {
+  const saved = readWatchlistState(input);
+  return {
+    input,
+    username: saved?.username || input.trim().replace(/^@/, ''),
+    importedFilms: readWatchlistImport(input),
+    pages: saved?.pages || {},
+    totalPages: saved?.totalPages || null,
+    truncated: false,
+    complete: Boolean(saved?.complete)
+  };
+}
+
 function memberFilms(member) {
+  if (member.importedFilms) return member.importedFilms;
   const deduped = new Map();
   Object.keys(member.pages)
     .map(Number)
@@ -265,30 +380,158 @@ function memberFilms(member) {
   return [...deduped.values()].slice(0, WATCHED_FILM_LIMIT);
 }
 
-function nextWatchedPage(member) {
-  if (member.complete) return null;
-  const ceiling = member.totalPages || 1;
-  for (let page = 1; page <= ceiling; page += 1) {
-    if (!member.pages[page]) return page;
-  }
-  return null;
+function memberHasFullHistory(member) {
+  return Boolean(member.importedFilms || member.complete || member.totalPages === 1);
 }
 
-function updateWatchedProgress(members) {
+function parseCsvRows(text) {
+  const rows = [];
+  let row = [];
+  let field = '';
+  let quoted = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (quoted) {
+      if (character === '"' && text[index + 1] === '"') {
+        field += '"';
+        index += 1;
+      } else if (character === '"') {
+        quoted = false;
+      } else {
+        field += character;
+      }
+    } else if (character === '"') {
+      quoted = true;
+    } else if (character === ',') {
+      row.push(field);
+      field = '';
+    } else if (character === '\n') {
+      row.push(field.replace(/\r$/, ''));
+      rows.push(row);
+      row = [];
+      field = '';
+    } else {
+      field += character;
+    }
+  }
+  if (field || row.length) {
+    row.push(field.replace(/\r$/, ''));
+    rows.push(row);
+  }
+  return rows;
+}
+
+function parseExportCsv(text, mode) {
+  const exportName = mode === 'watchlist' ? 'watchlist.csv' : 'watched.csv';
+  const listName = mode === 'watchlist' ? 'watchlist films' : 'watched films';
+  const rows = parseCsvRows(text);
+  if (rows.length < 2) throw new Error(`That file does not contain any ${listName}.`);
+  const headers = rows[0].map(header => header.replace(/^\uFEFF/, '').trim().toLowerCase());
+  const nameIndex = headers.indexOf('name');
+  const yearIndex = headers.indexOf('year');
+  const uriIndex = headers.indexOf('letterboxd uri');
+  if (nameIndex < 0 || uriIndex < 0) {
+    throw new Error(`Choose ${exportName} from the unzipped Letterboxd export.`);
+  }
+
+  const films = new Map();
+  for (const row of rows.slice(1)) {
+    const name = (row[nameIndex] || '').trim();
+    const year = yearIndex >= 0 ? (row[yearIndex] || '').trim() : '';
+    const url = (row[uriIndex] || '').trim();
+    const slug = url.match(/\/film\/([^/?#]+)/i)?.[1];
+    if (!name || !slug) continue;
+    films.set(slug, {
+      slug,
+      title: year ? `${name} (${year})` : name,
+      year,
+      poster: '',
+      url: url || `https://letterboxd.com/film/${slug}/`
+    });
+  }
+  if (!films.size) throw new Error(`No films were found. Choose ${exportName} from the Letterboxd export.`);
+  return [...films.values()];
+}
+
+async function importCollectionCsv(member, file, members, errorEl, mode) {
+  try {
+    errorEl.textContent = 'Reading file…';
+    member.importedFilms = parseExportCsv(await file.text(), mode);
+    if (mode === 'watchlist') saveWatchlistImport(member);
+    else saveWatchedImport(member);
+    const data = collectionComparisonData(members, !members.every(memberHasFullHistory), mode);
+    cache[mode] = { data };
+    renderCollection(data, mode);
+  } catch (error) {
+    errorEl.textContent = error.message || 'That file could not be read.';
+    errorEl.classList.add('error');
+  }
+}
+
+function collectionImportPanel(members, mode) {
+  const exportName = mode === 'watchlist' ? 'watchlist.csv' : 'watched.csv';
+  const panel = document.createElement('section');
+  panel.className = 'watched-import-panel';
+  const heading = document.createElement('h3');
+  heading.textContent = 'Want the complete match?';
+  const copy = document.createElement('p');
+  copy.textContent = `Each person can export their Letterboxd data, unzip it, and choose ${exportName} here. Your confirmed partial matches stay visible above.`;
+  const exportLink = document.createElement('a');
+  exportLink.href = 'https://letterboxd.com/settings/data/';
+  exportLink.target = '_blank';
+  exportLink.rel = 'noopener noreferrer';
+  exportLink.textContent = 'Open Letterboxd data export →';
+  const fields = document.createElement('div');
+  fields.className = 'watched-import-fields';
+
+  for (const member of members) {
+    const field = document.createElement('div');
+    field.className = 'watched-import-field';
+    const label = document.createElement('label');
+    label.textContent = `@${member.username}'s ${exportName}`;
+    field.appendChild(label);
+    if (memberHasFullHistory(member)) {
+      const loaded = document.createElement('span');
+      loaded.className = 'watched-import-loaded';
+      loaded.textContent = member.importedFilms ? `Loaded ${member.importedFilms.length} films ✓` : 'Complete from public profile ✓';
+      field.appendChild(loaded);
+    } else {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.csv,text/csv';
+      const feedback = document.createElement('small');
+      feedback.textContent = `Choose the unzipped ${exportName} file`;
+      input.addEventListener('change', () => {
+        if (input.files?.[0]) importCollectionCsv(member, input.files[0], members, feedback, mode);
+      });
+      field.append(input, feedback);
+    }
+    fields.appendChild(field);
+  }
+
+  const privacy = document.createElement('small');
+  privacy.className = 'watched-import-privacy';
+  privacy.textContent = 'Private by design: CSV files are read and saved in this browser only. They are never sent to WatchMatch or Vercel.';
+  panel.append(heading, copy, exportLink, fields, privacy);
+  return panel;
+}
+
+function updateCollectionProgress(members, mode) {
   const loadedPages = members.reduce((sum, member) => sum + Object.keys(member.pages).length, 0);
   const totalPages = members.reduce((sum, member) => sum + (member.totalPages || 1), 0);
   const loadedFilms = members.reduce((sum, member) => sum + memberFilms(member).length, 0);
+  const label = mode === 'watchlist' ? 'watchlist films' : 'watched films';
   gridEl.innerHTML = `
     <div class="loading-grid">
-      <strong>Loading watched films…</strong><br>
+      <strong>Loading ${label}…</strong><br>
       <span>${loadedPages} of ${totalPages} profile pages loaded · ${loadedFilms} films found</span><br>
-      <small>Successful pages are saved, so this can resume if Letterboxd pauses.</small>
+      <small>Checking the public pages Letterboxd allows without repeated retries.</small>
     </div>`;
 }
 
-async function requestWatchedPage(member, page) {
+async function requestCollectionPage(member, page, mode) {
   const params = new URLSearchParams({
-    mode: 'watched',
+    mode,
     user: member.input,
     page: String(page)
   });
@@ -305,10 +548,11 @@ async function requestWatchedPage(member, page) {
   member.totalPages = data.totalPages || 1;
   member.truncated = Boolean(data.truncated);
   member.complete = Object.keys(member.pages).length >= member.totalPages;
-  saveWatchedState(member);
+  if (mode === 'watchlist') saveWatchlistState(member);
+  else saveWatchedState(member);
 }
 
-function watchedComparisonData(members, partial = false) {
+function collectionComparisonData(members, partial = false, mode = 'watched') {
   const lists = members.map(memberFilms);
   const secondSlugs = new Set(lists[1].map(film => film.slug));
   const matches = lists[0].filter(film => secondSlugs.has(film.slug));
@@ -316,13 +560,14 @@ function watchedComparisonData(members, partial = false) {
   const totalPages = members.reduce((sum, member) => sum + (member.totalPages || 1), 0);
   return {
     users: members.map(member => member.username),
-    mode: 'watched',
+    mode,
     partial,
+    memberStates: members,
     progress: { loadedPages, totalPages },
     counts: lists.map(list => list.length),
     sources: members.map((member, index) => ({
       username: member.username,
-      label: 'Watched films',
+      label: mode === 'watchlist' ? 'Watchlist' : 'Watched films',
       status: lists[index].length ? 'public' : 'empty',
       truncated: member.truncated
     })),
@@ -330,38 +575,27 @@ function watchedComparisonData(members, partial = false) {
   };
 }
 
-async function loadWatchedComparison(user1, user2) {
-  const members = [watchedMember(user1), watchedMember(user2)];
+async function loadCollectionComparison(user1, user2, mode) {
+  const makeMember = mode === 'watchlist' ? watchlistMember : watchedMember;
+  const members = [makeMember(user1), makeMember(user2)];
   let madeRequest = false;
-  updateWatchedProgress(members);
+  updateCollectionProgress(members, mode);
 
   try {
-    while (members.some(member => !member.complete)) {
-      let advanced = false;
-      for (const member of members) {
-        const page = nextWatchedPage(member);
-        if (!page) {
-          member.complete = true;
-          saveWatchedState(member);
-          continue;
-        }
-        if (madeRequest) await sleep(WATCHED_PAGE_DELAY_MS);
-        await requestWatchedPage(member, page);
-        madeRequest = true;
-        advanced = true;
-        updateWatchedProgress(members);
-      }
-      if (!advanced) break;
+    for (const member of members) {
+      if (memberHasFullHistory(member) || member.pages[1]) continue;
+      if (madeRequest) await sleep(WATCHED_PAGE_DELAY_MS);
+      await requestCollectionPage(member, 1, mode);
+      madeRequest = true;
+      updateCollectionProgress(members, mode);
     }
   } catch (error) {
     const loadedPages = members.reduce((sum, member) => sum + Object.keys(member.pages).length, 0);
-    if (error.resumable && loadedPages > 0) {
-      error.partialData = watchedComparisonData(members, true);
-    }
+    if (loadedPages > 0) return collectionComparisonData(members, true, mode);
     throw error;
   }
 
-  return watchedComparisonData(members);
+  return collectionComparisonData(members, !members.every(memberHasFullHistory), mode);
 }
 
 function showLoading(mode) {
@@ -388,17 +622,19 @@ async function loadMode(mode, { force = false } = {}) {
 
   setActiveTab(mode);
   if (!force && cache[mode]) {
-    cache[mode].error ? renderError(cache[mode].error, mode) : render(cache[mode].data, mode);
+    if (cache[mode].error) renderError(cache[mode].error, mode);
+    else if (['watchlist', 'watched'].includes(mode)) renderCollection(cache[mode].data, mode);
+    else render(cache[mode].data, mode);
     return;
   }
 
   showLoading(mode);
   tabs.forEach(tab => { tab.disabled = true; });
   try {
-    if (mode === 'watched') {
-      const data = await loadWatchedComparison(user1, user2);
+    if (['watchlist', 'watched'].includes(mode)) {
+      const data = await loadCollectionComparison(user1, user2, mode);
       cache[mode] = { data };
-      render(data, mode);
+      renderCollection(data, mode);
       return;
     }
     const params = new URLSearchParams({ user1, user2, mode });
@@ -417,17 +653,13 @@ async function loadMode(mode, { force = false } = {}) {
     cache[mode] = { data };
     render(data, mode);
   } catch (error) {
-    if (mode === 'watched' && error.partialData) {
-      renderPartial(error.partialData, error);
-      return;
-    }
     const friendlyError = {
       title: error.title,
       message: error.message || 'Something went wrong.',
       users: [user1, user2],
-      resumable: Boolean(error.resumable)
+      resumable: false
     };
-    if (!friendlyError.resumable) cache[mode] = { error: friendlyError };
+    cache[mode] = { error: friendlyError };
     renderError(friendlyError, mode);
   } finally {
     tabs.forEach(tab => { tab.disabled = false; });

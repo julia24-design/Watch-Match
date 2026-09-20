@@ -270,9 +270,10 @@ export async function fetchMemberFilms(username, mode, session = null) {
   });
 }
 
-export async function fetchWatchedPage(username, pageNumber) {
-  const label = MODES.watched.label;
-  const path = `/${username}/films/${pageNumber === 1 ? '' : `page/${pageNumber}/`}`;
+export async function fetchMemberPage(username, mode, pageNumber) {
+  const config = MODES[mode];
+  const label = config.label;
+  const path = `/${username}/${config.path}/${pageNumber === 1 ? '' : `page/${pageNumber}/`}`;
   const result = await fetchHtml(`${LETTERBOXD}${path}`, 2, {
     cookies: new Map(),
     lastRequestAt: 0
@@ -289,25 +290,31 @@ export async function fetchWatchedPage(username, pageNumber) {
   }
 
   const films = parseFilms(result.html);
-  if (pageNumber === 1 && !films.length && privateMessage(result.html, 'watched')) {
+  if (pageNumber === 1 && !films.length && privateMessage(result.html, mode)) {
     return { username, label, status: 'private', films: [] };
   }
-  if (pageNumber === 1 && !films.length && !pageLooksRelevant(result.html, 'watched')) {
+  if (pageNumber === 1 && !films.length && !pageLooksRelevant(result.html, mode)) {
     return { username, label, status: 'unavailable', films: [] };
   }
 
   const availablePages = maxPage(result.html);
-  const totalPages = Math.min(availablePages, WATCHED_PAGE_LIMIT);
+  const totalPages = mode === 'watched'
+    ? Math.min(availablePages, WATCHED_PAGE_LIMIT)
+    : availablePages;
   return {
     username,
     label,
     status: films.length ? 'public' : 'empty',
     page: pageNumber,
     totalPages,
-    filmLimit: WATCHED_FILM_LIMIT,
-    truncated: availablePages > WATCHED_PAGE_LIMIT,
+    filmLimit: mode === 'watched' ? WATCHED_FILM_LIMIT : undefined,
+    truncated: mode === 'watched' && availablePages > WATCHED_PAGE_LIMIT,
     films
   };
+}
+
+export async function fetchWatchedPage(username, pageNumber) {
+  return fetchMemberPage(username, 'watched', pageNumber);
 }
 
 export function intersection(firstList, secondList) {
@@ -396,13 +403,14 @@ export default async function handler(request, response) {
 
   const singleUser = normalizeUsername(url.searchParams.get('user'));
   const requestedPage = Number(url.searchParams.get('page'));
-  if (mode === 'watched' && singleUser && Number.isInteger(requestedPage)) {
-    if (requestedPage < 1 || requestedPage > WATCHED_PAGE_LIMIT) {
-      sendJson(response, 400, { error: `Watched pages must be between 1 and ${WATCHED_PAGE_LIMIT}.` });
+  if (['watchlist', 'watched'].includes(mode) && singleUser && Number.isInteger(requestedPage)) {
+    const pageLimit = mode === 'watched' ? WATCHED_PAGE_LIMIT : 1;
+    if (requestedPage < 1 || requestedPage > pageLimit) {
+      sendJson(response, 400, { error: `${MODES[mode].label} pages must be between 1 and ${pageLimit}.` });
       return;
     }
     try {
-      const source = await fetchWatchedPage(singleUser, requestedPage);
+      const source = await fetchMemberPage(singleUser, mode, requestedPage);
       if (['private', 'not_found', 'unavailable', 'blocked'].includes(source.status)) {
         const friendly = errorFor(source);
         sendJson(response, 422, {
@@ -418,7 +426,7 @@ export default async function handler(request, response) {
       sendJson(response, 200, source);
     } catch (error) {
       console.error(error);
-      sendJson(response, 500, { error: 'WatchMatch could not load this page of watched films.' });
+      sendJson(response, 500, { error: `WatchMatch could not load this page of ${MODES[mode].label.toLowerCase()}.` });
     }
     return;
   }

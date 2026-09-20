@@ -49,6 +49,19 @@ input { width: 100%; color: #fff; background: transparent; border: 0; outline: 0
 .tiny-note { margin: 12px 4px 0; text-align: center; color: #71808a; font-size: .76rem; }
 .status { max-width: 820px; margin: 20px auto 0; padding: 17px 19px; border: 1px solid var(--line); background: var(--panel); border-radius: 14px; color: #c8d0d5; line-height: 1.5; }
 .status.error { border-color: rgba(255,128,0,.4); }
+.watched-import-panel { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+.watched-import-panel h3 { margin: 0 0 5px; color: var(--text); font-size: 1rem; }
+.watched-import-panel p { margin: 0 0 8px; color: var(--muted); font-size: .9rem; }
+.watched-import-panel > a { color: var(--blue); font-size: .86rem; font-weight: 750; }
+.watched-import-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; margin-top: 14px; }
+.watched-import-field { min-width: 0; padding: 12px; border: 1px solid #303b44; border-radius: 11px; background: #0d1216; }
+.watched-import-field label { display: block; margin-bottom: 7px; color: #d9e0e4; font-size: .82rem; font-weight: 760; }
+.watched-import-field input[type="file"] { display: block; padding: 0; color: var(--muted); font-size: .76rem; }
+.watched-import-field input[type="file"]::file-selector-button { margin-right: 8px; padding: 7px 9px; border: 1px solid #3a4750; border-radius: 8px; color: #e3eaee; background: #1b242b; cursor: pointer; }
+.watched-import-field small { display: block; margin-top: 7px; color: #78868f; font-size: .72rem; }
+.watched-import-field small.error { color: #ff9b49; }
+.watched-import-loaded { color: var(--green); font-size: .8rem; font-weight: 750; }
+.watched-import-privacy { display: block; margin-top: 12px; color: #78868f; font-size: .74rem; }
 .hidden { display: none !important; }
 .results { margin-top: 52px; }
 .match-tabs {
@@ -126,4 +139,5 @@ footer { padding: 64px 0 0; text-align: center; color: #5d6971; font-size: .74re
   .results-head { align-items: center; }
   .match-tabs { display: flex; width: 100%; }
   .match-tab { flex: 1; padding-inline: 8px; }
+  .watched-import-fields { grid-template-columns: 1fr; }
 }
