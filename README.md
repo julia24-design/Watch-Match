@@ -20,4 +20,4 @@ No environment variables or API keys are required.
 
 Only public Letterboxd data can be compared. Private or unavailable sections show a friendly error message. This is an unofficial personal project and is not affiliated with Letterboxd.
 
-Version 2.6 avoids repeated requests to blocked Watchlist and Watched pages and offers a reliable, private CSV route for complete results.
+Version 2.6.1 loads complete paginated watchlists when Letterboxd permits it, preserves confirmed partial matches if a later page is blocked, and keeps CSV as the reliable fallback. Watched histories continue to use the safer first-page-plus-CSV workflow.

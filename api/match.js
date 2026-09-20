@@ -251,6 +251,23 @@ export async function fetchMemberFilms(username, mode, session = null) {
 
   const failedPage = remaining.find(page => !page.ok);
   if (failedPage) {
+    if (mode === 'watchlist') {
+      const deduped = new Map();
+      const successfulPages = remaining.filter(page => page.ok);
+      for (const film of [firstFilms, ...successfulPages.map(page => page.films)].flat()) {
+        deduped.set(film.slug, film);
+      }
+      const films = [...deduped.values()];
+      return {
+        username,
+        label: config.label,
+        status: films.length ? 'public' : 'empty',
+        partial: true,
+        loadedPages: 1 + successfulPages.length,
+        totalPages: pages,
+        films
+      };
+    }
     return {
       username,
       label: config.label,
@@ -266,6 +283,9 @@ export async function fetchMemberFilms(username, mode, session = null) {
     username,
     label: config.label,
     status: films.length ? 'public' : 'empty',
+    partial: false,
+    loadedPages: pages,
+    totalPages: pages,
     films
   });
 }
@@ -456,12 +476,23 @@ export default async function handler(request, response) {
     }
 
     const matches = intersection(sources[0].films, sources[1].films);
+    const partial = mode === 'watchlist' && sources.some(source => source.partial);
     response.setHeader('Cache-Control', 'public, max-age=60, s-maxage=600, stale-while-revalidate=3600');
     sendJson(response, 200, {
       users: [user1, user2],
       mode,
+      partial,
       counts: sources.map(source => source.films.length),
       sources: sources.map(({ films, ...source }) => source),
+      memberStates: partial ? sources.map(source => ({
+        input: source.username,
+        username: source.username,
+        importedFilms: null,
+        pages: { 1: source.films },
+        totalPages: source.totalPages || 1,
+        truncated: false,
+        complete: !source.partial
+      })) : undefined,
       matches
     });
   } catch (error) {

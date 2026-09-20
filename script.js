@@ -623,7 +623,9 @@ async function loadMode(mode, { force = false } = {}) {
   setActiveTab(mode);
   if (!force && cache[mode]) {
     if (cache[mode].error) renderError(cache[mode].error, mode);
-    else if (['watchlist', 'watched'].includes(mode)) renderCollection(cache[mode].data, mode);
+    else if (mode === 'watched' || (mode === 'watchlist' && cache[mode].data.partial)) {
+      renderCollection(cache[mode].data, mode);
+    }
     else render(cache[mode].data, mode);
     return;
   }
@@ -631,7 +633,7 @@ async function loadMode(mode, { force = false } = {}) {
   showLoading(mode);
   tabs.forEach(tab => { tab.disabled = true; });
   try {
-    if (['watchlist', 'watched'].includes(mode)) {
+    if (mode === 'watched') {
       const data = await loadCollectionComparison(user1, user2, mode);
       cache[mode] = { data };
       renderCollection(data, mode);
@@ -639,7 +641,7 @@ async function loadMode(mode, { force = false } = {}) {
     }
     const params = new URLSearchParams({ user1, user2, mode });
     const response = await fetch(`/api/match?${params.toString()}`);
-    const data = await response.json().catch(() => ({}));
+    let data = await response.json().catch(() => ({}));
     if (!response.ok) {
       const error = {
         title: data.title,
@@ -650,8 +652,19 @@ async function loadMode(mode, { force = false } = {}) {
       renderError(error, mode);
       return;
     }
+    if (mode === 'watchlist' && data.partial && data.memberStates) {
+      for (const member of data.memberStates) {
+        member.importedFilms = readWatchlistImport(member.input);
+      }
+      data = collectionComparisonData(
+        data.memberStates,
+        !data.memberStates.every(memberHasFullHistory),
+        'watchlist'
+      );
+    }
     cache[mode] = { data };
-    render(data, mode);
+    if (mode === 'watchlist' && data.partial) renderCollection(data, mode);
+    else render(data, mode);
   } catch (error) {
     const friendlyError = {
       title: error.title,
