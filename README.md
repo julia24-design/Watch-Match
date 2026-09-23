@@ -1,23 +1,63 @@
+````markdown
 # WatchMatch
 
-Compare two public Letterboxd profiles and find:
+WatchMatch is a lightweight web app that helps two Letterboxd users find movies they both want to watch.
 
-- films on both watchlists
-- films both people have watched
-- films both people have liked
+Instead of manually comparing watchlists, users can enter two Letterboxd usernames and see where their movie preferences overlap across watchlists, watched films, and liked films.
 
-The frontend is a static HTML/CSS/JavaScript page. A Vercel serverless function reads the public Letterboxd pages on demand, calculates the overlap, and lazy-loads poster art.
+**Live app:** https://watch-match-seven.vercel.app/
 
-Watchlist and Watched comparisons show the matches confirmed from the public profile pages Letterboxd permits. For complete lists, both people can optionally upload the `watchlist.csv` or `watched.csv` files from their official Letterboxd data exports. Those files are parsed and saved only in the browser; they are never uploaded to the app or Vercel.
+## Features
 
-## Deploy
+- Compare two Letterboxd users' watchlists
+- Identify movies both users have already watched
+- Find films both users have liked
+- Browse shared matches with movie posters
+- Use **Surprise Me** to randomly select a movie from matched results
+- Support larger watchlists through CSV uploads when public profile data is incomplete
+- Handle pagination, duplicate results, and partial profile data
 
-Upload these files to the root of the existing GitHub repository. Vercel will redeploy automatically from the connected branch.
+## Why I Built It
 
-No environment variables or API keys are required.
+I use Letterboxd to keep track of movies I want to watch, but choosing a movie with someone else usually means searching through two separate watchlists.
 
-## Notes
+I built WatchMatch to make that process easier: enter two profiles, see the overlap, and pick something you both already want to watch.
 
-Only public Letterboxd data can be compared. Private or unavailable sections show a friendly error message. This is an unofficial personal project and is not affiliated with Letterboxd.
+The project was also an opportunity to build and deploy a web application end-to-end and work through the limitations of retrieving data from public Letterboxd profiles.
 
-Version 2.6.1 loads complete paginated watchlists when Letterboxd permits it, preserves confirmed partial matches if a later page is blocked, and keeps CSV as the reliable fallback. Watched histories continue to use the safer first-page-plus-CSV workflow.
+## How It Works
+
+WatchMatch retrieves publicly available Letterboxd profile data and compares the resulting movie lists between two users.
+
+Because Letterboxd profile pages can behave differently depending on list size, pagination, and request limits, the app includes fallback logic for incomplete results. Users can also upload Letterboxd CSV exports for more complete matching when needed.
+
+Uploaded CSV files are processed in the browser and are not stored by the application.
+
+## Tech Stack
+
+- JavaScript
+- HTML / CSS
+- Node.js
+- Vercel serverless functions
+- Vercel for deployment
+
+## Running Locally
+
+Clone the repository:
+
+```bash
+git clone https://github.com/julia24-design/Watch-Match.git
+cd Watch-Match
+````
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Run the project locally:
+
+```bas
+```
+
