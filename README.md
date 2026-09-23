@@ -1,4 +1,3 @@
-````markdown
 # WatchMatch
 
 WatchMatch is a lightweight web app that helps two Letterboxd users find movies they both want to watch.
@@ -48,7 +47,7 @@ Clone the repository:
 ```bash
 git clone https://github.com/julia24-design/Watch-Match.git
 cd Watch-Match
-````
+```
 
 Install dependencies:
 
@@ -58,6 +57,12 @@ npm install
 
 Run the project locally:
 
-```bas
+```bash
+npx vercel dev
 ```
 
+## Notes
+
+WatchMatch is an independent personal project and is not affiliated with Letterboxd.
+
+The app relies on publicly available Letterboxd profile information, so results may occasionally be limited by profile privacy settings, site changes, or request restrictions.
